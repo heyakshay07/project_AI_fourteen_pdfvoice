@@ -1,0 +1,6 @@
+# Primary local TTS engine (needs torch + espeak-ng, see Dockerfile)
+kokoro==0.9.4
+# Optional engine: Microsoft Edge online voices (needs internet; good Marathi/Hindi coverage)
+edge-tts==7.0.0
+# Optional advanced engine (large download, GPU recommended). Uncomment to enable:
+# coqui-tts==0.25.3

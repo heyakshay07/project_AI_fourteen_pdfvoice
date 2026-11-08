@@ -1,0 +1,34 @@
+# --- Web / API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.1
+email-validator==2.2.0
+PyJWT==2.10.1
+
+# --- Database ---
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+
+# --- Background processing ---
+celery==5.4.0
+redis==5.2.1
+
+# --- PDF / OCR / audio ---
+PyMuPDF==1.25.1
+pytesseract==0.3.13
+Pillow==11.1.0
+numpy==2.2.1
+soundfile==0.12.1
+
+# --- Agent orchestration ---
+langgraph==0.2.60
+
+# --- Storage (only used when STORAGE_BACKEND=s3) ---
+boto3==1.35.90
+
+# --- Tests ---
+pytest==8.3.4
+httpx==0.28.1
