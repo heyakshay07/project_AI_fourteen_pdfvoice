@@ -57,6 +57,16 @@ def test_health(client):
     assert client.get("/api/v1/health").json() == {"status": "ok"}
 
 
+def test_root(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {
+        "service": "PDFVoice AI API",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
+
+
 def test_sse_progress_stream_emits_final_event(client, auth):
     d = upload(client, auth, F.small_pdf(1)).json()["id"]
     client.post(f"/api/v1/pdf/{d}/process", headers=auth)

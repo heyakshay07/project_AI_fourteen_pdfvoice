@@ -61,6 +61,15 @@ for r in (auth.router, pdf.router, voice.router, playback.router, history.router
     app.include_router(r)
 
 
+@app.get("/", tags=["meta"])
+def root():
+    return {
+        "service": "PDFVoice AI API",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
+
+
 @app.get("/api/v1/health", tags=["meta"])
 def health():
     with engine.connect() as conn:
