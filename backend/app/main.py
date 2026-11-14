@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,6 +18,11 @@ log = logging.getLogger("pdfvoice")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if os.getenv("RENDER", "").lower() == "true" and settings.database_url.startswith("sqlite"):
+        raise RuntimeError(
+            "Render uses an ephemeral filesystem by default. Set DATABASE_URL to a persistent "
+            "PostgreSQL database before starting PDFVoice; SQLite would lose users and documents on restart."
+        )
     if settings.secret_key == "change-me" and settings.app_env != "development":
         raise RuntimeError("SECRET_KEY must be set to a strong random value outside development")
     if settings.secret_key == "change-me":
