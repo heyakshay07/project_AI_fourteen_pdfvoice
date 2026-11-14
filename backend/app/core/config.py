@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me"
     access_token_expire_minutes: int = 60 * 24 * 4
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://project-ai-fourteen-pdfvoice.onrender.com"
+    frontend_origin: str = "https://project-ai-fourteen-pdfvoice.onrender.com"
 
     # Database
     database_url: str = "sqlite:///./pdfvoice.db"
@@ -58,7 +59,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        # Browsers send an origin without a trailing slash. Normalize dashboard values and
+        # always keep the configured production frontend allowed even if CORS_ORIGINS is overridden.
+        origins = [o.strip().strip("\"").rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+        frontend = self.frontend_origin.strip().strip("\"").rstrip("/")
+        if frontend and frontend not in origins:
+            origins.append(frontend)
+        return origins
 
     @property
     def sqlalchemy_database_url(self) -> str:
