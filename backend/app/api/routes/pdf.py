@@ -1,8 +1,10 @@
 import asyncio
 import json
 import re
+import tempfile
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
@@ -70,21 +72,18 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
         raise ApiError(415, "invalid_file_type", "The file is not a valid PDF")
 
     doc_id = uuid.uuid4()
-    key = f"uploads/{user.id}/{doc_id}.pdf"
-    storage = get_storage()
-    storage.put_bytes(key, data)
     try:
-        with storage.local_copy(key) as path:
+        with tempfile.TemporaryDirectory(prefix="pdfvoice_upload_") as tmp:
+            path = Path(tmp) / filename
+            path.write_bytes(data)
             analysis = analyze_pdf(path)  # fast: detects corrupted / encrypted / too-long PDFs
     except PdfError as exc:
-        storage.delete(key)
         raise ApiError(422, exc.code, exc.message)
     except Exception as exc:
-        storage.delete(key)
         raise ApiError(422, "corrupted", f"The PDF could not be read: {exc}")
 
     doc = Document(
-        id=doc_id, user_id=user.id, filename=filename, file_path=key, file_size=size,
+        id=doc_id, user_id=user.id, filename=filename, pdf_data=data, file_size=size,
         total_pages=analysis["page_count"], processing_status="uploaded",
         analysis={k: analysis[k] for k in ("pdf_type", "ocr_pages", "metadata")},
     )
@@ -101,7 +100,12 @@ def get_document(doc: Document = Depends(get_owned_document)):
 @router.get("/{document_id}/file")
 def download_original(doc: Document = Depends(get_owned_document)):
     """Serves the original PDF to its owner (used by PDF.js). Storage paths are never revealed."""
-    data = get_storage().get_bytes(doc.file_path)
+    if doc.pdf_data is not None:
+        data = doc.pdf_data
+    elif doc.file_path:
+        data = get_storage().get_bytes(doc.file_path)
+    else:
+        raise ApiError(404, "file_not_found", "The original PDF is unavailable")
     return Response(content=data, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{doc.id}.pdf"', "Cache-Control": "private, max-age=3600"})
 
@@ -146,7 +150,8 @@ def get_text(
 def delete_document(doc: Document = Depends(get_owned_document), db: Session = Depends(get_db)):
     storage = get_storage()
     storage.delete_prefix(f"audio/{doc.id}")
-    storage.delete(doc.file_path)
+    if doc.file_path:
+        storage.delete(doc.file_path)
     db.delete(doc)  # cascades to pages, segments, progress
     db.commit()
     return Response(status_code=204)

@@ -1,6 +1,8 @@
 import uuid
+import jwt
 
 from tests import pdf_factory as F
+from app.core.config import settings
 from tests.conftest import upload
 
 
@@ -10,6 +12,13 @@ def test_unauthenticated_and_bad_token(client):
     assert r.status_code == 401 and r.json()["error"]["code"] == "http_error"
 
 
+def test_unauthorized_responses_include_cors_for_deployed_frontend(client):
+    origin = "https://project-ai-fourteen-pdfvoice.onrender.com"
+    response = client.get(f"/api/v1/pdf/{uuid.uuid4()}", headers={"Origin": origin})
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_login_errors_and_success(client):
     body = {"name": "A", "email": "dupe@example.com", "password": "longenough1"}
     assert client.post("/api/v1/auth/register", json=body).status_code == 201
@@ -17,6 +26,8 @@ def test_login_errors_and_success(client):
     assert client.post("/api/v1/auth/login", json={"email": "dupe@example.com", "password": "wrong"}).status_code == 401
     ok = client.post("/api/v1/auth/login", json={"email": "DUPE@example.com", "password": "longenough1"})
     assert ok.status_code == 200
+    claims = jwt.decode(ok.json()["access_token"], settings.secret_key, algorithms=["HS256"])
+    assert claims["exp"] - claims["iat"] == 4 * 24 * 60 * 60
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {ok.json()['access_token']}"})
     assert me.json()["email"] == "dupe@example.com"
 
@@ -46,8 +57,8 @@ def test_processing_failure_is_recorded(client, auth, monkeypatch):
     d = upload(client, auth, F.small_pdf(1)).json()["id"]
     with SessionLocal() as db:  # simulate a file that became unreadable after upload
         doc = db.get(Document, _u.UUID(d))
-        from app.services.storage_service import get_storage
-        get_storage().put_bytes(doc.file_path, F.CORRUPTED)
+        doc.pdf_data = F.CORRUPTED
+        db.commit()
     client.post(f"/api/v1/pdf/{d}/process", headers=auth)
     st = client.get(f"/api/v1/pdf/{d}/status", headers=auth).json()
     assert st["processing_status"] == "failed" and st["error_message"]

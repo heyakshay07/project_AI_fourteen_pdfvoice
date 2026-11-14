@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     # App
     app_env: str = "development"
     secret_key: str = "change-me"
-    access_token_expire_minutes: int = 60 * 24
-    cors_origins: str = "http://localhost:5173"
+    access_token_expire_minutes: int = 60 * 24 * 4
+    cors_origins: str = "http://localhost:5173,http://localhost:3000,https://project-ai-fourteen-pdfvoice.onrender.com"
 
     # Database
     database_url: str = "sqlite:///./pdfvoice.db"

@@ -7,6 +7,7 @@ _TMP = tempfile.mkdtemp(prefix="pdfvoice_test_")
 os.environ.update(
     DATABASE_URL=f"sqlite:///{_TMP}/test.db", STORAGE_DIR=f"{_TMP}/storage", TASK_BACKEND="inline",
     SECRET_KEY="test-secret-key-that-is-long-enough-32b", AUDIO_FORMAT="mp3", OCR_LANGUAGES="eng",
+    CORS_ORIGINS="http://localhost:5173,https://project-ai-fourteen-pdfvoice.onrender.com",
 )
 
 import numpy as np  # noqa: E402

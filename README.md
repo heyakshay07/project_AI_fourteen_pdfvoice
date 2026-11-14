@@ -135,7 +135,11 @@ Errors always look like `{"error": {"code": "file_too_large", "message": "...", 
 ## 6. Configuration
 
 See `backend/.env.example` (every setting is documented there). Most useful: `TASK_BACKEND`, `DATABASE_URL`,
-`STORAGE_BACKEND` (`local` or `s3`), `MAX_UPLOAD_MB`, `OCR_LANGUAGES`, `CHUNK_MAX_CHARS`, `AUDIO_FORMAT`.
+`STORAGE_BACKEND` (`local` or `s3`), `CORS_ORIGINS` (include the exact frontend origin),
+`ACCESS_TOKEN_EXPIRE_MINUTES` (defaults to four days),
+`MAX_UPLOAD_MB`, `OCR_LANGUAGES`, `CHUNK_MAX_CHARS`, `AUDIO_FORMAT`. Uploaded PDF bytes are stored in the
+database; audio files continue to use the configured storage backend. Existing PDFs stored before this change
+remain readable from their original storage location.
 
 ## 7. Languages and voices
 

@@ -1,6 +1,10 @@
 """Background jobs. The same plain functions run under Celery (production) or FastAPI BackgroundTasks (dev)."""
 import logging
+import tempfile
 import uuid
+from contextlib import contextmanager
+from pathlib import Path
+from collections.abc import Iterator
 
 from celery import Celery
 from sqlalchemy import delete
@@ -18,6 +22,21 @@ log = logging.getLogger("pdfvoice.tasks")
 
 celery_app = Celery("pdfvoice", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(task_track_started=True, task_acks_late=True, worker_prefetch_multiplier=1)
+
+
+@contextmanager
+def _local_pdf_copy(pdf_data: bytes | None, key: str | None, filename: str) -> Iterator[Path]:
+    if pdf_data is not None:
+        with tempfile.TemporaryDirectory(prefix="pdfvoice_process_") as tmp:
+            path = Path(tmp) / filename
+            path.write_bytes(pdf_data)
+            yield path
+        return
+    if key:
+        with get_storage().local_copy(key) as path:
+            yield path
+        return
+    raise FileNotFoundError("PDF content and legacy storage key are both missing")
 
 
 def _set_progress(document_id: uuid.UUID, stage: str, percent: float, status: str | None = None, error: str | None = None) -> None:
@@ -40,7 +59,7 @@ def process_document(document_id: str) -> None:
         doc = db.get(Document, doc_id)
         if doc is None:
             return
-        key = doc.file_path
+        key, pdf_data, filename = doc.file_path, doc.pdf_data, doc.filename
     _set_progress(doc_id, "starting", 1, status="processing", error="")
 
     last = {"stage": "", "pct": -10.0}
@@ -51,7 +70,7 @@ def process_document(document_id: str) -> None:
             _set_progress(doc_id, stage, pct)
 
     try:
-        with get_storage().local_copy(key) as path:
+        with _local_pdf_copy(pdf_data, key, filename) as path:
             state = run_processing_workflow(path, progress)
         _set_progress(doc_id, "saving", 90)
 

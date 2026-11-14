@@ -7,12 +7,23 @@ from tests.conftest import make_user, upload
 
 
 def test_upload_valid_pdf_returns_metadata(client, auth):
-    r = upload(client, auth, F.small_pdf(3), "My Report.pdf")
+    pdf_bytes = F.small_pdf(3)
+    r = upload(client, auth, pdf_bytes, "My Report.pdf")
     assert r.status_code == 201
     body = r.json()
     assert body["total_pages"] == 3 and body["filename"] == "My Report.pdf"
     assert body["processing_status"] == "uploaded" and body["file_size"] > 0
     assert "file_path" not in body  # private paths are never exposed
+    assert client.get(f"/api/v1/pdf/{body['id']}/file", headers=auth).content == pdf_bytes
+
+    from app.core.database import SessionLocal
+    from app.models.document import Document
+    import uuid
+
+    with SessionLocal() as db:
+        doc = db.get(Document, uuid.UUID(body["id"]))
+        assert doc.pdf_data == pdf_bytes
+        assert doc.file_path is None
 
 
 def test_upload_requires_auth(client):

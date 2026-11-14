@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid
+from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.user import utcnow
@@ -14,7 +14,8 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
-    file_path: Mapped[str] = mapped_column(String(512))  # storage KEY, never exposed through the API
+    file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)  # legacy storage key
+    pdf_data: Mapped[bytes | None] = deferred(mapped_column(LargeBinary, nullable=True))
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     total_pages: Mapped[int] = mapped_column(Integer, default=0)
     # uploaded | queued | processing | completed | failed
