@@ -52,7 +52,7 @@ export const pdf = {
   remove: (id) => http.delete(`/api/v1/pdf/${id}`),
   pages: (id) => d(http.get(`/api/v1/pdf/${id}/pages`)),
   page: (id, n) => d(http.get(`/api/v1/pdf/${id}/text`, { params: { page: n } })).then((r) => r.pages[0]),
-  file: (id) => http.get(`/api/v1/pdf/${id}/file`, { responseType: 'arraybuffer' }).then((r) => r.data),
+  fileUrl: (id) => `${BASE}/api/v1/pdf/${id}/file`,
 };
 
 /** Server-Sent Events over fetch so the Authorization header can be sent (EventSource cannot). */

@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -98,7 +98,7 @@ def get_document(doc: Document = Depends(get_owned_document)):
 
 
 @router.get("/{document_id}/file")
-def download_original(doc: Document = Depends(get_owned_document)):
+def download_original(request: Request, doc: Document = Depends(get_owned_document)):
     """Serves the original PDF to its owner (used by PDF.js). Storage paths are never revealed."""
     if doc.pdf_data is not None:
         data = doc.pdf_data
@@ -106,8 +106,33 @@ def download_original(doc: Document = Depends(get_owned_document)):
         data = get_storage().get_bytes(doc.file_path)
     else:
         raise ApiError(404, "file_not_found", "The original PDF is unavailable")
-    return Response(content=data, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{doc.id}.pdf"', "Cache-Control": "private, max-age=3600"})
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": f'inline; filename="{doc.id}.pdf"',
+        "Cache-Control": "private, max-age=3600",
+    }
+    range_header = request.headers.get("range")
+    if range_header:
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        size = len(data)
+        if not match or not any(match.groups()):
+            return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
+        first, last = match.groups()
+        if first:
+            start = int(first)
+            end = min(int(last), size - 1) if last else size - 1
+        else:
+            suffix_length = int(last)
+            start, end = max(0, size - suffix_length), size - 1
+        if start >= size or start > end:
+            return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
+        partial = data[start : end + 1]
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(len(partial))
+        return Response(content=partial, status_code=206, media_type="application/pdf", headers=headers)
+
+    return Response(content=data, media_type="application/pdf", headers=headers)
 
 
 @router.get("/{document_id}/pages", response_model=list[PageSummary])

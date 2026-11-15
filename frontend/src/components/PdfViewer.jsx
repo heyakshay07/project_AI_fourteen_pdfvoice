@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { getToken } from '../services/api';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -8,7 +9,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  * Renders one PDF page with PDF.js and overlays the currently spoken paragraph.
  * `highlight` is a bbox [x0, y0, x1, y1] in PDF points (top-left origin), exactly as stored by the backend.
  */
-export default function PdfViewer({ data, page, zoom, highlight, onPageCount }) {
+export default function PdfViewer({ url, page, zoom, highlight, onPageCount }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
   const [doc, setDoc] = useState(null);
@@ -17,14 +18,21 @@ export default function PdfViewer({ data, page, zoom, highlight, onPageCount }) 
   const [rendering, setRendering] = useState(false);
 
   useEffect(() => {
-    if (!data) return undefined;
+    if (!url) return undefined;
     let cancelled = false;
-    const task = pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) });
+    const token = getToken();
+    const task = pdfjsLib.getDocument({
+      url,
+      httpHeaders: token ? { Authorization: `Bearer ${token}` } : {},
+      rangeChunkSize: 512 * 1024,
+      disableStream: true,
+      disableAutoFetch: true,
+    });
     task.promise.then((d) => { if (!cancelled) { setDoc(d); onPageCount?.(d.numPages); } })
       .catch((e) => !cancelled && setError(e.message));
     return () => { cancelled = true; task.destroy(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [url]);
 
   useEffect(() => {
     if (!doc || !page) return undefined;

@@ -43,7 +43,7 @@ export default function ReaderPage() {
   const [doc, setDoc] = useState(null);
   const [progress, setProgress] = useState(null);
   const [segments, setSegments] = useState([]);
-  const [pdfData, setPdfData] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
   const [pages, setPages] = useState({}); // page number -> text/sentences/validation
   const [viewPage, setViewPage] = useState(1);
   const [zoom, setZoom] = useState(1.25);
@@ -89,9 +89,9 @@ export default function ReaderPage() {
   // ----- once processed: segments, original PDF, saved position
   useEffect(() => {
     if (doc?.processing_status !== 'completed') return;
-    Promise.all([voice.segments(id), pdf.file(id), history.get(id).catch(() => null)]).then(([segs, buf, h]) => {
+    setPdfUrl(pdf.fileUrl(id));
+    Promise.all([voice.segments(id), history.get(id).catch(() => null)]).then(([segs, h]) => {
       setSegments(segs);
-      setPdfData(buf);
       const start = h?.current_page ? { page: h.current_page, sentence: h.current_sentence || 0 } : { page: segs[0]?.page_number || 1, sentence: 0 };
       player.setPosition(start);
       setViewPage(start.page);
@@ -172,7 +172,7 @@ export default function ReaderPage() {
           </p>
         )}
         {tab === 'pdf'
-          ? <PdfViewer data={pdfData} page={viewPage} zoom={zoom} highlight={viewPage === curPage && currentSentence ? currentSentence.bbox : null} />
+          ? <PdfViewer url={pdfUrl} page={viewPage} zoom={zoom} highlight={viewPage === curPage && currentSentence ? currentSentence.bbox : null} />
           : <TextPanel pageData={viewData} activeSentence={viewPage === curPage ? curSentence : -1} onSelect={(i) => player.seekTo(viewPage, i)} />}
         {warnPages > 0 && <p className="mt-2 text-xs text-slate-500">{warnPages} page(s) had extraction warnings. Nothing was silently dropped; check the Text tab.</p>}
       </section>
