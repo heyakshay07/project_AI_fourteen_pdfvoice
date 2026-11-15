@@ -96,7 +96,6 @@ def _segment_or_404(db: Session, doc: Document, segment_id: int) -> AudioSegment
 
 
 def _ensure(db, user, doc, seg, engine, voice, language) -> tuple[AudioSegment, tuple[str, str, str]]:
-    require_completed(doc)
     triple = resolve_voice(db, user, engine, voice, language)
     try:
         return voice_agent.ensure_segment_audio(db, seg, *triple), triple

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.agents import playback_agent as agent
-from app.api.deps import ApiError, require_completed
+from app.api.deps import ApiError
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.document import Document
@@ -18,7 +18,7 @@ def _doc(db: Session, user: User, document_id: uuid.UUID) -> Document:
     doc = db.get(Document, document_id)
     if doc is None or doc.user_id != user.id:
         raise ApiError(404, "document_not_found", "Document not found")
-    return require_completed(doc)
+    return doc
 
 
 def _state(prog, state: str) -> PlaybackState:

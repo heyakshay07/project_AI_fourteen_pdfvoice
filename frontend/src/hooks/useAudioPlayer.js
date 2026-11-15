@@ -11,7 +11,7 @@ const PREFETCH_AHEAD = 2;
  * Segments are fetched through axios (so the JWT is sent) and played from blob URLs; the next segments
  * are prefetched so playback continues without gaps.
  */
-export default function useAudioPlayer({ documentId, segments, voiceKey, initialPosition, onError }) {
+export default function useAudioPlayer({ documentId, segments, voiceKey, initialPosition, onError, processing = false }) {
   const audioRef = useRef(null);
   if (audioRef.current === null && typeof Audio !== 'undefined') audioRef.current = new Audio();
 
@@ -34,6 +34,8 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
   const speedRef = useRef(1);
   const playingRef = useRef(false);
   const shouldContinue = useRef(false);
+  const processingRef = useRef(processing);
+  processingRef.current = processing;
 
   const segs = segments || [];
   const segsRef = useRef(segs);
@@ -162,6 +164,9 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
       const next = segIdxRef.current + 1;
       if (next < segsRef.current.length) {
         await playSegment(next);
+      } else if (processingRef.current) {
+        // Keep the listening session alive; the next page batch will arrive while we wait.
+        setPlayingBoth(false);
       } else {
         shouldContinue.current = false;
         stopLoop();
@@ -174,6 +179,13 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
     a.addEventListener('ended', onEnded);
     return () => { a.removeEventListener('timeupdate', onTime); a.removeEventListener('ended', onEnded); };
   }, [documentId, playSegment]);
+
+  useEffect(() => {
+    const next = segIdxRef.current + 1;
+    if (shouldContinue.current && !playingRef.current && audioRef.current?.ended && next < segs.length) {
+      playSegment(next);
+    }
+  }, [segs, playSegment]);
 
   // ---------------------------------------------------------------- public controls
   const play = useCallback(async () => {

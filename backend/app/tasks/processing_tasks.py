@@ -10,7 +10,7 @@ from celery import Celery
 from sqlalchemy import delete
 
 from app.agents import voice_agent
-from app.agents.workflow import run_processing_workflow
+from app.agents import chunk_manager, pdf_analyzer, text_extraction, text_validation
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.audio_segment import AudioSegment
@@ -53,7 +53,7 @@ def _set_progress(document_id: uuid.UUID, stage: str, percent: float, status: st
 
 
 def process_document(document_id: str) -> None:
-    """Analyze -> extract -> validate -> chunk (LangGraph), then persist pages and audio-segment rows."""
+    """Prepare and persist small page batches so the reader can start before the PDF finishes."""
     doc_id = uuid.UUID(document_id)
     with SessionLocal() as db:
         doc = db.get(Document, doc_id)
@@ -61,6 +61,10 @@ def process_document(document_id: str) -> None:
             return
         key, pdf_data, filename = doc.file_path, doc.pdf_data, doc.filename
     _set_progress(doc_id, "starting", 1, status="processing", error="")
+    with SessionLocal() as db:
+        db.execute(delete(AudioSegment).where(AudioSegment.document_id == doc_id))
+        db.execute(delete(DocumentPage).where(DocumentPage.document_id == doc_id))
+        db.commit()
 
     last = {"stage": "", "pct": -10.0}
 
@@ -71,31 +75,44 @@ def process_document(document_id: str) -> None:
 
     try:
         with _local_pdf_copy(pdf_data, key, filename) as path:
-            state = run_processing_workflow(path, progress)
-        _set_progress(doc_id, "saving", 90)
+            _set_progress(doc_id, "analyzing", 2)
+            analysis = pdf_analyzer.analyze_pdf(path)
+            with SessionLocal() as db:
+                doc = db.get(Document, doc_id)
+                if doc is None: return
+                doc.total_pages = analysis["page_count"]
+                doc.analysis = {k: analysis[k] for k in ("pdf_type", "ocr_pages", "metadata")}
+                db.commit()
+
+            batch_size = 4
+            for start in range(1, analysis["page_count"] + 1, batch_size):
+                end = min(start + batch_size - 1, analysis["page_count"])
+                pages = text_extraction.extract_pages(path, analysis, only_pages=set(range(start, end + 1)))
+                pages, retry = text_validation.validate_pages(pages)
+                if retry:
+                    redone = {p["page_number"]: p for p in text_extraction.extract_pages(
+                        path, analysis, force_ocr=set(retry), only_pages=set(retry))}
+                    pages = [({**redone[p["page_number"]], "errors": [], "validation_status": "ok", "validation_notes": []}
+                              if p["page_number"] in redone and redone[p["page_number"]]["paragraphs"] else p) for p in pages]
+                    pages, _ = text_validation.validate_pages(pages)
+                chunks = chunk_manager.build_chunks(pages)
+                with SessionLocal() as db:
+                    doc = db.get(Document, doc_id)
+                    if doc is None: return
+                    for p in pages:
+                        pc = chunks[p["page_number"]]
+                        db.add(DocumentPage(document_id=doc_id, page_number=p["page_number"],
+                            extracted_text="\n\n".join(x["text"] for x in p["paragraphs"]), extraction_method=p["method"],
+                            validation_status=p["validation_status"], validation_notes=p["validation_notes"],
+                            width=p["width"], height=p["height"], sentences=pc["sentences"]))
+                        for c in pc["chunks"]:
+                            db.add(AudioSegment(document_id=doc_id, page_number=p["page_number"], **c))
+                    db.commit()
+                progress("extracting", 5 + 80 * end / max(analysis["page_count"], 1))
 
         with SessionLocal() as db:
             doc = db.get(Document, doc_id)
-            if doc is None:
-                return  # deleted while processing
-            db.execute(delete(AudioSegment).where(AudioSegment.document_id == doc_id))
-            db.execute(delete(DocumentPage).where(DocumentPage.document_id == doc_id))
-            analysis = state["analysis"]
-            for p in state["pages"]:
-                pc = state["chunks"][p["page_number"]]
-                db.add(
-                    DocumentPage(
-                        document_id=doc_id, page_number=p["page_number"],
-                        extracted_text="\n\n".join(x["text"] for x in p["paragraphs"]),
-                        extraction_method=p["method"], validation_status=p["validation_status"],
-                        validation_notes=p["validation_notes"], width=p["width"], height=p["height"],
-                        sentences=pc["sentences"],
-                    )
-                )
-                for c in pc["chunks"]:
-                    db.add(AudioSegment(document_id=doc_id, page_number=p["page_number"], **c))
-            doc.total_pages = analysis["page_count"]
-            doc.analysis = {k: analysis[k] for k in ("pdf_type", "ocr_pages", "metadata")}
+            if doc is None: return
             doc.processing_status, doc.progress_stage, doc.progress_percent, doc.error_message = "completed", "completed", 100.0, None
             db.commit()
     except PdfError as exc:
