@@ -30,8 +30,7 @@ services:
       TASK_BACKEND: celery
       STORAGE_BACKEND: local
       STORAGE_DIR: /data/storage
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
-    volumes:
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173,https://project-ai-fourteen-pdfvoice-backend.onrender.com
       - storage:/data/storage
       - models:/models                # caches the Kokoro model download
     ports: ["8000:8000"]
