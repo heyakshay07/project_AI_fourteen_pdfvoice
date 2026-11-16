@@ -30,12 +30,19 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="PDFVoice AI", version="1.0.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
-    expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "Content-Disposition"],
-)
+api_app = FastAPI(title="PDFVoice AI", version="1.0.0", lifespan=lifespan)
+
+
+def _with_cors(application):
+    """Wrap the whole ASGI app so CORS headers also cover unhandled 500 responses."""
+    return CORSMiddleware(
+        application,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "Content-Disposition"],
+    )
 
 
 def _error(status: int, code: str, message: str, details=None) -> JSONResponse:
@@ -45,30 +52,30 @@ def _error(status: int, code: str, message: str, details=None) -> JSONResponse:
     return JSONResponse(status_code=status, content=body)
 
 
-@app.exception_handler(HTTPException)
+@api_app.exception_handler(HTTPException)
 async def http_exc_handler(_: Request, exc: HTTPException):
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         return _error(exc.status_code, exc.detail["code"], exc.detail["message"])
     return _error(exc.status_code, "http_error", str(exc.detail))
 
 
-@app.exception_handler(RequestValidationError)
+@api_app.exception_handler(RequestValidationError)
 async def validation_handler(_: Request, exc: RequestValidationError):
     details = [{"field": ".".join(str(p) for p in e["loc"] if p != "body"), "message": e["msg"]} for e in exc.errors()]
     return _error(422, "validation_error", "Request validation failed", details)
 
 
-@app.exception_handler(Exception)
+@api_app.exception_handler(Exception)
 async def unhandled_handler(_: Request, exc: Exception):
     log.exception("Unhandled error")
     return _error(500, "internal_error", "Something went wrong on our side")
 
 
 for r in (auth.router, pdf.router, voice.router, playback.router, history.router):
-    app.include_router(r)
+    api_app.include_router(r)
 
 
-@app.get("/", tags=["meta"])
+@api_app.get("/", tags=["meta"])
 def root():
     return {
         "service": "PDFVoice AI API",
@@ -77,8 +84,11 @@ def root():
     }
 
 
-@app.get("/api/v1/health", tags=["meta"])
+@api_app.get("/api/v1/health", tags=["meta"])
 def health():
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+app = _with_cors(api_app)

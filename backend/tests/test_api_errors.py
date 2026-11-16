@@ -1,5 +1,7 @@
 import uuid
 import jwt
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from tests import pdf_factory as F
 from app.core.config import settings
@@ -17,6 +19,21 @@ def test_unauthorized_responses_include_cors_for_deployed_frontend(client):
     response = client.get(f"/api/v1/pdf/{uuid.uuid4()}", headers={"Origin": origin})
     assert response.status_code == 401
     assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_unhandled_server_errors_include_cors_for_deployed_frontend():
+    from app.main import _with_cors
+
+    probe = FastAPI()
+
+    @probe.get("/failure")
+    def failure():
+        raise RuntimeError("simulated server error")
+
+    with TestClient(_with_cors(probe), raise_server_exceptions=False) as client:
+        response = client.get("/failure", headers={"Origin": "https://project-ai-fourteen-pdfvoice.onrender.com"})
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == "https://project-ai-fourteen-pdfvoice.onrender.com"
 
 
 def test_login_errors_and_success(client):
