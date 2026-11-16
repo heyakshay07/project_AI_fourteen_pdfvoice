@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     default_voice: str = "af_heart"
     default_language: str = "en"
 
+    # Optional Groq models: local extraction/TTS remain usable without an API key.
+    groq_api_key: str = ""
+    groq_text_model: str = "openai/gpt-oss-20b"
+    groq_tts_model: str = "canopylabs/orpheus-v1-english"
+
     @field_validator("task_backend")
     @classmethod
     def _check_backend(cls, v: str) -> str:

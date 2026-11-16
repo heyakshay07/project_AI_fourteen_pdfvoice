@@ -50,6 +50,7 @@ export default function ReaderPage() {
   const [tab, setTab] = useState('pdf');
   const [voiceSettings, setVoiceSettings] = useState(null);
   const requested = useRef(new Set());
+  const lastSegmentPageCount = useRef(0);
 
   const voiceKey = voiceSettings ? `${voiceSettings.voice_engine}|${voiceSettings.voice_name}|${voiceSettings.language}` : '';
   const player = useAudioPlayer({
@@ -82,7 +83,8 @@ export default function ReaderPage() {
     const ctrl = new AbortController();
     streamProgress(id, async (p) => {
       setProgress(p);
-      if (p.pages_extracted > 0) {
+      if (p.pages_extracted > 0 && p.pages_extracted !== lastSegmentPageCount.current) {
+        lastSegmentPageCount.current = p.pages_extracted;
         const ready = await voice.segments(id).catch(() => null);
         if (ready) setSegments(ready);
         setPdfUrl(pdf.fileUrl(id));
@@ -118,7 +120,11 @@ export default function ReaderPage() {
     pdf.page(id, n).then((p) => setPages((m) => ({ ...m, [n]: p })))
       .catch((e) => { requested.current.delete(n); if (e.response?.status !== 404) toast.error(errorMessage(e)); else setPages((m) => ({ ...m, [n]: { page_number: n, sentences: [], validation_status: 'empty', validation_notes: ['This page has no extracted text.'], extraction_method: 'none' } })); });
   }, [id, toast]);
-  useEffect(() => { if (doc?.processing_status === 'completed') { ensurePage(viewPage); ensurePage(player.position.page); } }, [viewPage, player.position.page, doc?.processing_status, ensurePage]);
+  const extractedPageCount = doc?.processing_status === 'completed' ? doc.total_pages : progress?.pages_extracted || 0;
+  useEffect(() => {
+    if (viewPage <= extractedPageCount) ensurePage(viewPage);
+    if (player.position.page <= extractedPageCount) ensurePage(player.position.page);
+  }, [viewPage, player.position.page, extractedPageCount, ensurePage]);
 
   // follow the reader while audio is playing
   useEffect(() => { if (player.playing) setViewPage(player.position.page); }, [player.playing, player.position.page]);
