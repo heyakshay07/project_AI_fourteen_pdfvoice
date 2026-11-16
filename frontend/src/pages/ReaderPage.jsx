@@ -225,7 +225,7 @@ export default function ReaderPage() {
       </section>
 
       <aside className="space-y-4">
-        <AudioPlayer player={player} totalPages={totalPages} readingPct={readingPct} disabled={!segments.length || segments[0]?.generation_status === 'pending' || !voiceSettings} currentSentenceText={currentSentence?.text} />
+        <AudioPlayer player={player} totalPages={totalPages} readingPct={readingPct} disabled={!segments.length || !voiceSettings} currentSentenceText={currentSentence?.text} />
         <VoiceSettings documentId={id} compact onChange={setVoiceSettings} />
       </aside>
     </main>
