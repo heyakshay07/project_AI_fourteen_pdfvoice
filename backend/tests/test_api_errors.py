@@ -50,6 +50,24 @@ def test_double_process_conflict_and_reprocess(client, auth):
     assert client.post(f"/api/v1/pdf/{d}/process", headers=auth).status_code == 202  # completed docs can be re-processed
 
 
+def test_queue_failure_marks_document_failed_and_allows_retry(client, auth, monkeypatch):
+    from app.api import routes
+    original_dispatch = routes.pdf.dispatch
+    d = upload(client, auth, F.small_pdf(1)).json()["id"]
+
+    def unavailable(*_args):
+        raise RuntimeError("broker down")
+
+    monkeypatch.setattr(routes.pdf, "dispatch", unavailable)
+    response = client.post(f"/api/v1/pdf/{d}/process", headers=auth)
+    assert response.status_code == 503 and response.json()["error"]["code"] == "queue_unavailable"
+    assert client.get(f"/api/v1/pdf/{d}/status", headers=auth).json()["processing_status"] == "failed"
+
+    monkeypatch.setattr(routes.pdf, "dispatch", original_dispatch)
+    retried = client.post(f"/api/v1/pdf/{d}/process", headers=auth)
+    assert retried.status_code == 202
+
+
 def test_processing_failure_is_recorded(client, auth, monkeypatch):
     from app.core.database import SessionLocal
     from app.models.document import Document

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import tempfile
 import time
@@ -21,11 +22,12 @@ from app.models.user import User
 from app.schemas.pdf import (DocumentOut, PageSummary, PageText, ProcessResponse, ProgressOut, StatusOut,
                              TextResponse)
 from app.services.pdf_service import PdfError
-from app.agents.pdf_analyzer import analyze_pdf
+from app.agents.pdf_analyzer import inspect_pdf
 from app.services.storage_service import get_storage
 from app.tasks.processing_tasks import dispatch
 
 router = APIRouter(prefix="/api/v1/pdf", tags=["pdf"])
+log = logging.getLogger("pdfvoice.api.pdf")
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ \-()\u0900-\u097F]")
 
@@ -50,45 +52,53 @@ def to_document_out(doc: Document) -> DocumentOut:
 
 
 @router.post("/upload", response_model=DocumentOut, status_code=201)
-async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def upload_pdf(background_tasks: BackgroundTasks, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     filename = sanitize_filename(file.filename or "document.pdf")
     if not (file.filename or "").lower().endswith(".pdf"):
         raise ApiError(415, "invalid_file_type", "Only .pdf files are accepted")
-
-    # stream the body with a hard size cap (never trust Content-Length)
-    chunks, size = [], 0
-    while True:
-        part = await file.read(1024 * 1024)
-        if not part:
-            break
-        size += len(part)
-        if size > settings.max_upload_bytes:
-            raise ApiError(413, "file_too_large", f"File exceeds the {settings.max_upload_mb} MB limit")
-        chunks.append(part)
-    data = b"".join(chunks)
-    if size == 0:
-        raise ApiError(422, "empty_file", "The uploaded file is empty")
-    if not data.lstrip()[:5] == b"%PDF-":  # magic-byte check; extension/content-type alone are not trusted
-        raise ApiError(415, "invalid_file_type", "The file is not a valid PDF")
 
     doc_id = uuid.uuid4()
     try:
         with tempfile.TemporaryDirectory(prefix="pdfvoice_upload_") as tmp:
             path = Path(tmp) / filename
-            path.write_bytes(data)
-            analysis = analyze_pdf(path)  # fast: detects corrupted / encrypted / too-long PDFs
+            size = 0
+            with path.open("wb") as target:
+                while True:
+                    part = await file.read(1024 * 1024)
+                    if not part:
+                        break
+                    size += len(part)
+                    if size > settings.max_upload_bytes:
+                        raise ApiError(413, "file_too_large", f"File exceeds the {settings.max_upload_mb} MB limit")
+                    target.write(part)
+            if size == 0:
+                raise ApiError(422, "empty_file", "The uploaded file is empty")
+            with path.open("rb") as source:
+                if not source.read(1024).lstrip().startswith(b"%PDF-"):
+                    raise ApiError(415, "invalid_file_type", "The file is not a valid PDF")
+            analysis = inspect_pdf(path)
+            data = path.read_bytes()
     except PdfError as exc:
         raise ApiError(422, exc.code, exc.message)
+    except ApiError:
+        raise
     except Exception as exc:
         raise ApiError(422, "corrupted", f"The PDF could not be read: {exc}")
 
     doc = Document(
         id=doc_id, user_id=user.id, filename=filename, pdf_data=data, file_size=size,
-        total_pages=analysis["page_count"], processing_status="uploaded",
+        total_pages=analysis["page_count"], processing_status="queued", progress_stage="queued",
         analysis={k: analysis[k] for k in ("pdf_type", "ocr_pages", "metadata")},
     )
     db.add(doc)
     db.commit()
+    try:
+        dispatch(background_tasks, "process_document", str(doc.id))
+    except Exception as exc:
+        log.exception("Could not queue processing for uploaded document %s", doc.id)
+        doc.processing_status, doc.progress_stage = "failed", "failed"
+        doc.error_message = "Processing could not be queued. Retry from the reader."
+        db.commit()
     return to_document_out(doc)
 
 
@@ -203,7 +213,14 @@ def process_pdf(background_tasks: BackgroundTasks, doc: Document = Depends(get_o
         raise ApiError(409, "already_processing", "This document is already being processed")
     doc.processing_status, doc.progress_stage, doc.progress_percent, doc.error_message = "queued", "queued", 0.0, None
     db.commit()
-    dispatch(background_tasks, "process_document", str(doc.id))
+    try:
+        dispatch(background_tasks, "process_document", str(doc.id))
+    except Exception as exc:
+        log.exception("Could not queue processing for document %s", doc.id)
+        doc.processing_status, doc.progress_stage = "failed", "failed"
+        doc.error_message = "Processing could not be queued. Please retry."
+        db.commit()
+        raise ApiError(503, "queue_unavailable", "The processing queue is unavailable. Please retry.") from exc
     return ProcessResponse(document_id=doc.id, processing_status="queued")
 
 

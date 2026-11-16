@@ -38,7 +38,9 @@ function Processing({ doc, progress, onRetry }) {
         <div className="h-full bg-brand-600 transition-all" style={{ width: `${pct}%` }} />
       </div>
       <p className="text-sm text-slate-500"><span className="spinner" /> {STAGES[progress?.stage || doc.progress_stage] || 'Working…'} {pct}%</p>
-      {progress && progress.total_pages > 0 && <p className="text-xs text-slate-500">{progress.pages_extracted}/{progress.total_pages} pages saved</p>}
+      {progress && progress.total_pages > 0 && <p className="text-xs text-slate-500">
+        {progress.pages_extracted}/{progress.total_pages} pages extracted Â· {progress.chunks_audio_ready} audio chunks ready
+      </p>}
     </div>
   );
 }
@@ -120,6 +122,15 @@ export default function ReaderPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.processing_status, id]);
 
+  useEffect(() => {
+    if (!segments.length || segments[0].generation_status !== 'pending') return undefined;
+    const timer = setInterval(async () => {
+      const ready = await voice.segments(id, 1, 3).catch(() => null);
+      if (ready) setSegments((current) => mergeSegments(current, ready));
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [id, segments.length, segments[0]?.generation_status]);
+
   // ----- page text cache
   const ensurePage = useCallback((n) => {
     if (!n || requested.current.has(n)) return;
@@ -164,9 +175,15 @@ export default function ReaderPage() {
   return (
     <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_380px]">
       <section aria-label="Document">
-        {doc.processing_status !== 'completed' && <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950 dark:text-brand-100">
-          {STAGES[progress?.stage || doc.progress_stage] || 'Preparing the next section…'} {Math.round(progress?.percent ?? doc.progress_percent ?? 0)}%
-          {progress && <span className="ml-2">· {progress.pages_extracted}/{progress.total_pages} pages ready. You can listen while the next pages are prepared.</span>}
+        {doc.processing_status !== 'completed' && <div className={`mb-4 rounded-lg border p-3 text-sm ${doc.processing_status === 'failed' ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100' : 'border-brand-200 bg-brand-50 text-brand-900 dark:border-brand-900 dark:bg-brand-950 dark:text-brand-100'}`}>
+          {doc.processing_status === 'failed' ? <>
+            <p className="font-medium">Processing stopped: {doc.error_message || 'A page batch failed.'}</p>
+            <p className="mt-1">Your saved pages remain available. Retry resumes from the first missing batch.</p>
+            <button className="btn-primary mt-2" onClick={startProcessing}>Retry remaining pages</button>
+          </> : <>
+            {STAGES[progress?.stage || doc.progress_stage] || 'Preparing the next section…'} {Math.round(progress?.percent ?? doc.progress_percent ?? 0)}%
+            {progress && <span className="ml-2">· {progress.pages_extracted}/{progress.total_pages} pages ready. You can listen while the next pages are prepared.</span>}
+          </>}
         </div>}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
@@ -208,7 +225,7 @@ export default function ReaderPage() {
       </section>
 
       <aside className="space-y-4">
-        <AudioPlayer player={player} totalPages={totalPages} readingPct={readingPct} disabled={!segments.length || !voiceSettings} currentSentenceText={currentSentence?.text} />
+        <AudioPlayer player={player} totalPages={totalPages} readingPct={readingPct} disabled={!segments.length || segments[0]?.generation_status === 'pending' || !voiceSettings} currentSentenceText={currentSentence?.text} />
         <VoiceSettings documentId={id} compact onChange={setVoiceSettings} />
       </aside>
     </main>

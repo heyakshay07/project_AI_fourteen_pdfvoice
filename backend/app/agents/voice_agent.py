@@ -42,22 +42,10 @@ def _find_cached(document_id: uuid.UUID, seg: AudioSegment, vkey: str) -> tuple[
 
 def ensure_segment_audio(db: Session, seg: AudioSegment, engine: str, voice: str, language: str, speed: float = 1.0) -> AudioSegment:
     """Make sure `seg` has audio for this voice. Idempotent: re-running never duplicates content."""
-    vkey = audio_service.voice_key(engine, voice, language)
-    if seg.generation_status == "ready" and seg.voice_key == vkey and seg.audio_path and get_storage().exists(seg.audio_path):
-        return seg
-
     with _locks[seg.id]:
-        db.refresh(seg)
-        if seg.generation_status == "ready" and seg.voice_key == vkey and seg.audio_path and get_storage().exists(seg.audio_path):
-            return seg
-
-        cached = _find_cached(seg.document_id, seg, vkey)  # e.g. user switched voice back and forth
-        if cached:
-            key, meta = cached
-            _apply_ready(seg, key, meta["duration"], meta["timings"], vkey)
-            db.commit()
-            return seg
-
+        # Serialize generation across worker processes as well as threads. PostgreSQL holds
+        # this row lock until the ready/failed state is committed.
+        db.refresh(seg, with_for_update=True)
         page = db.scalar(
             select(DocumentPage).where(DocumentPage.document_id == seg.document_id, DocumentPage.page_number == seg.page_number)
         )
@@ -66,6 +54,19 @@ def ensure_segment_audio(db: Session, seg: AudioSegment, engine: str, voice: str
             seg.generation_status, seg.error_message = "failed", "Segment has no source sentences"
             db.commit()
             raise TTSError(seg.error_message)
+
+        source_text = "\n".join(sentence["text"] for sentence in sentences)
+        vkey = audio_service.voice_key(engine, voice, language, source_text, speed)
+        if seg.generation_status == "ready" and seg.voice_key == vkey and seg.audio_path and get_storage().exists(seg.audio_path):
+            db.commit()  # release the cross-worker row lock
+            return seg
+
+        cached = _find_cached(seg.document_id, seg, vkey)  # e.g. user switched voice or source text changed
+        if cached:
+            key, meta = cached
+            _apply_ready(seg, key, meta["duration"], meta["timings"], vkey)
+            db.commit()
+            return seg
 
         provider = tts_service.get_provider(engine)
         tts_service.resolve_voice(engine, voice, language)  # validates the combination

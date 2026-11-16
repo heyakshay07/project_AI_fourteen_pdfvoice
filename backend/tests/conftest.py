@@ -7,6 +7,7 @@ _TMP = tempfile.mkdtemp(prefix="pdfvoice_test_")
 os.environ.update(
     DATABASE_URL=f"sqlite:///{_TMP}/test.db", STORAGE_DIR=f"{_TMP}/storage", TASK_BACKEND="inline",
     SECRET_KEY="test-secret-key-that-is-long-enough-32b", AUDIO_FORMAT="mp3", OCR_LANGUAGES="eng",
+    GROQ_API_KEY="",
     CORS_ORIGINS="http://localhost:5173,https://project-ai-fourteen-pdfvoice.onrender.com",
 )
 
@@ -52,6 +53,14 @@ def _schema():
     yield
     engine.dispose()
     shutil.rmtree(_TMP, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _disable_background_tts_during_tests(monkeypatch):
+    """Keep network/model work out of unrelated tests; scheduling has a focused unit test."""
+    from app.tasks import processing_tasks
+
+    monkeypatch.setattr(processing_tasks, "_schedule_segment_audio", lambda *_args: None)
 
 
 @pytest.fixture()

@@ -69,7 +69,7 @@ export default function UploadDropzone({ onUploaded }) {
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-emerald-600">✓ Uploaded · {result.total_pages} page{result.total_pages === 1 ? '' : 's'}
                 {result.pdf_type === 'scanned' ? ' · scanned (OCR needed)' : result.pdf_type === 'mixed' ? ' · partly scanned' : ''}</span>
-              <button className="btn-primary" onClick={() => navigate(`/read/${result.id}`)}>Process &amp; read →</button>
+              <button className="btn-primary" onClick={() => navigate(`/read/${result.id}`)}>Open reader →</button>
             </div>
           )}
         </div>

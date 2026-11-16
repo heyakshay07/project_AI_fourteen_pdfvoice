@@ -17,23 +17,32 @@ def extract_pages(
     force_ocr: set[int] | None = None,
     only_pages: set[int] | None = None,
     progress: Callable[[int, int], None] | None = None,
+    pdf_doc=None,
 ) -> list[dict]:
     """Return one dict per page: {page_number, method, width, height, paragraphs[], raw_word_count, errors[]}."""
     force_ocr = force_ocr or set()
     ocr_needed = set(analysis.get("ocr_pages", [])) | force_ocr
     results: list[dict] = []
-    doc = pdf_service.open_pdf(path)
+    opened_here = pdf_doc is None
+    doc = pdf_service.open_pdf(path) if opened_here else pdf_doc
     try:
         targets = [n for n in range(1, doc.page_count + 1) if only_pages is None or n in only_pages]
         for done, number in enumerate(targets, start=1):
             page = doc[number - 1]
             errors: list[str] = []
+            needs_ocr = number in ocr_needed
+            if not needs_ocr:
+                try:
+                    needs_ocr = pdf_service.analyze_page(page).needs_ocr
+                except Exception:
+                    needs_ocr = True
             entry = {
                 "page_number": number, "method": "none", "width": float(page.rect.width),
-                "height": float(page.rect.height), "paragraphs": [], "raw_word_count": 0, "errors": errors,
+                "height": float(page.rect.height), "paragraphs": [], "raw_word_count": 0,
+                "needs_ocr": needs_ocr, "errors": errors,
             }
             try:
-                if number in ocr_needed:
+                if needs_ocr:
                     paras = []
                     local_ocr_error = None
                     tesseract_ready = ocr_service.tesseract_available()
@@ -75,5 +84,6 @@ def extract_pages(
             if progress:
                 progress(done, len(targets))
     finally:
-        doc.close()
+        if opened_here:
+            doc.close()
     return results

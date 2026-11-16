@@ -81,9 +81,10 @@ def generate(body: GenerateRequest, background_tasks: BackgroundTasks, db: Sessi
 
 
 @router.get("/{document_id}/segments", response_model=list[SegmentOut])
-def list_segments(from_page: int = Query(default=1, ge=1), doc: Document = Depends(get_owned_document), db: Session = Depends(get_db)):
+def list_segments(from_page: int = Query(default=1, ge=1), limit: int = Query(default=10_000, ge=1, le=10_000),
+                  doc: Document = Depends(get_owned_document), db: Session = Depends(get_db)):
     segs = db.scalars(select(AudioSegment).where(AudioSegment.document_id == doc.id, AudioSegment.page_number >= from_page)
-                      .order_by(AudioSegment.page_number, AudioSegment.chunk_index)).all()
+                      .order_by(AudioSegment.page_number, AudioSegment.chunk_index).limit(limit)).all()
     return [SegmentOut(id=s.id, page_number=s.page_number, chunk_index=s.chunk_index, sentence_start=s.sentence_start,
                        sentence_end=s.sentence_end, generation_status=s.generation_status, duration=s.duration) for s in segs]
 

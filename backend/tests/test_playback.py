@@ -83,11 +83,11 @@ def test_history_isolated_between_users(client):
     assert client.post("/api/v1/playback/start", headers=b, json={"document_id": d}).status_code == 404
 
 
-def test_playback_requires_processed_document(client, auth):
+def test_playback_state_can_be_initialized_before_audio_request(client, auth):
     from tests.conftest import upload
     d = upload(client, auth, F.small_pdf(1)).json()["id"]
     r = client.post("/api/v1/playback/start", headers=auth, json={"document_id": d})
-    assert r.status_code == 409
+    assert r.status_code == 200 and r.json()["state"] == "playing"
 
 
 def test_deleting_document_removes_progress(client, auth):

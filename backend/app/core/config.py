@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     # Uploads
     max_upload_mb: int = 100
     max_pages: int = 5000
-    processing_batch_pages: int = Field(default=4, ge=1, le=32)
+    processing_batch_pages: int = Field(default=16, ge=1, le=32)
+    tts_worker_concurrency: int = Field(default=2, ge=1, le=4)
 
     # Extraction
     ocr_languages: str = "eng+hin+mar"

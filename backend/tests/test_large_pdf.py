@@ -1,5 +1,11 @@
 import time
+import uuid
 
+from app.core.database import SessionLocal
+from app.models.audio_segment import AudioSegment
+from app.models.document import Document
+from sqlalchemy import select
+from app.tasks import processing_tasks
 from tests import pdf_factory as F
 from tests.conftest import upload_and_process
 
@@ -24,3 +30,25 @@ def test_large_pdf_150_pages_processes_completely(client, auth):
     assert time.time() - t0 < 120
     text = client.get(f"/api/v1/pdf/{doc['id']}/text?start=148&limit=10", headers=auth).json()["pages"]
     assert [p["page_number"] for p in text] == [148, 149, 150]
+
+
+def test_audio_batches_prioritize_first_three_chunks(client, auth, monkeypatch):
+    doc = upload_and_process(client, auth, F.large_pdf(8))
+    with SessionLocal() as db:
+        row = db.get(Document, uuid.UUID(doc["id"]))
+        user_id = row.user_id
+        expected_ids = db.scalars(
+            select(AudioSegment.id)
+            .where(AudioSegment.document_id == row.id, AudioSegment.page_number <= 4)
+            .order_by(AudioSegment.page_number, AudioSegment.chunk_index)
+        ).all()
+
+    scheduled = []
+    monkeypatch.setattr(processing_tasks, "_schedule_segment_audio", lambda _doc, ids, *_voice: scheduled.append(list(ids)))
+    processing_tasks._schedule_batch_audio(uuid.UUID(doc["id"]), user_id, 1, 4)
+
+    assert scheduled[0] == expected_ids[:3]
+    assert scheduled[1] == expected_ids[3:]
+    assert len(expected_ids) >= 4
+    assert processing_tasks.celery_app.conf.task_routes["pdfvoice.process_document"]["queue"] == "extract"
+    assert processing_tasks.celery_app.conf.task_routes["pdfvoice.generate_segment_ids_audio"]["queue"] == "tts"

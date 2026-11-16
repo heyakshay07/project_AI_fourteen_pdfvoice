@@ -10,8 +10,11 @@ from app.services.storage_service import get_storage
 from app.utils import audio_utils
 
 
-def voice_key(engine: str, voice: str, language: str) -> str:
-    return hashlib.sha1(f"{engine}|{voice}|{language}".encode()).hexdigest()[:16]
+def voice_key(engine: str, voice: str, language: str, text: str = "", speed: float = 1.0) -> str:
+    model = settings.groq_tts_model if engine == "groq" else ""
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    basis = f"{engine}|{voice}|{language}|{model}|{settings.audio_format}|{speed}|{text_hash}"
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
 
 
 def assemble(clips: list[tuple[np.ndarray, int]], sentence_indices: list[int], heading_flags: list[bool], para_end_flags: list[bool]):

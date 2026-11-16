@@ -6,6 +6,22 @@ from app.services import pdf_service
 from app.services.pdf_service import PdfError
 
 
+def inspect_pdf(path: Path) -> dict:
+    """Validate a PDF and read cheap document-level metadata without scanning every page."""
+    doc = pdf_service.open_pdf(path)
+    try:
+        if doc.page_count > settings.max_pages:
+            raise PdfError("too_many_pages", f"The PDF has {doc.page_count} pages; the limit is {settings.max_pages}.")
+        return {
+            "page_count": doc.page_count,
+            "pdf_type": "pending",
+            "ocr_pages": [],
+            "metadata": {k: v for k, v in (doc.metadata or {}).items() if v},
+        }
+    finally:
+        doc.close()
+
+
 def analyze_pdf(path: Path) -> dict:
     doc = pdf_service.open_pdf(path)  # raises PdfError(corrupted | encrypted | empty)
     try:

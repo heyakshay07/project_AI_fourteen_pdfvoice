@@ -127,5 +127,12 @@ def test_audio_requires_processed_document(client, auth, tone):
     use_tone_voice(client, auth)
     from tests.conftest import upload
     doc_id = upload(client, auth, F.small_pdf(1)).json()["id"]
+    from app.core.database import SessionLocal
+    from app.models.document import Document
+    import uuid
+    with SessionLocal() as db:
+        doc = db.get(Document, uuid.UUID(doc_id))
+        doc.processing_status = "processing"
+        db.commit()
     r = client.post("/api/v1/voice/generate", headers=auth, json={"document_id": doc_id})
     assert r.status_code == 409 and r.json()["error"]["code"] == "not_processed"

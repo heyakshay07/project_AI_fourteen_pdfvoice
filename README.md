@@ -43,15 +43,17 @@ The specialized agents live in `backend/app/agents/`:
 | Workflow | `workflow.py` | LangGraph graph that wires the first four together |
 | Groq Enrichment | `groq_enrichment.py` | optional vision OCR fallback plus prepared text and summaries |
 
-Large PDFs are prepared in four-page batches. The reader loads page text as each batch is saved, refreshes the segment
-list only when a batch arrives, and generates voice audio lazily for the current chunk and the next two chunks.
+Large PDFs return a document ID after a quick validity/page-count check. A worker opens the PDF once, saves an initial
+four-page batch, then continues in configurable batches of 16 pages by default. The reader loads page text as each batch
+is saved. TTS runs on a separate queue: the first three chunks are prioritized, then each extracted batch is queued
+without waiting for the browser. The player can start as soon as the first chunk is ready and prefetches the next two.
 Groq TTS is available for English when `GROQ_API_KEY` is configured; local and Edge voices remain available too.
 
 Design decisions worth knowing:
 
-- **Audio is generated lazily.** Processing extracts text and creates `audio_segments` rows (status `pending`). Audio for
-  a segment is generated the first time it is requested, and the player prefetches the next two segments.
-  "Pre-generate all audio" (button / `POST /voice/generate`) fills the cache in the background.
+- **Audio is progressive.** Processing extracts text and creates `audio_segments` rows. A separate TTS worker prepares
+  the initial three segments first and queues later segments batch by batch. The reader can also request a pending
+  segment on demand. `POST /voice/generate` can fill the cache for completed documents.
 - **Highlight sync is exact.** Each sentence is synthesised separately and concatenated with known pauses, so the
   server knows every sentence's start/end time (`timings`). The browser just looks up `currentTime`.
 - **Speed is client-side** (`audio.playbackRate`), so changing speed never regenerates audio.
@@ -108,11 +110,17 @@ PostgreSQL database and set these backend environment variables in the Render da
 - `SECRET_KEY`: a strong random value; keep it unchanged across deploys so existing login tokens remain valid
 - `APP_ENV=production`
 - `CORS_ORIGINS=https://project-ai-fourteen-pdfvoice.onrender.com`
+- `TASK_BACKEND=celery` with a Render Key Value instance and a Background Worker consuming `extract`. Deploy a second Background Worker for `tts`. Both workers need the same `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, and storage settings as the web service. Use these worker commands:
+  - PDF extraction: `celery -A app.tasks.processing_tasks:celery_app worker -Q extract --loglevel=INFO --concurrency=1`
+  - Audio generation: `celery -A app.tasks.processing_tasks:celery_app worker -Q tts --loglevel=INFO --concurrency=2`
+  - Optional Groq enrichment, only when `GROQ_API_KEY` is set: `celery -A app.tasks.processing_tasks:celery_app worker -Q enrich --loglevel=INFO --concurrency=1`
+  If the extract worker is missing or not connected to the same Redis instance, documents stay queued at 0%. The web process cannot consume Celery queues by itself.
 - `GROQ_API_KEY` (optional; enables Groq OCR fallback, page enrichment, and English Orpheus voices)
 - `GROQ_TEXT_MODEL` (optional; defaults to `openai/gpt-oss-20b`)
 - `GROQ_VISION_MODEL` (optional; defaults to `qwen/qwen3.8-27b`)
 - `GROQ_TTS_MODEL` (optional; defaults to `canopylabs/orpheus-v1-english`)
-- `PROCESSING_BATCH_PAGES` (optional; defaults to 4, allowed range 1-32)
+- `PROCESSING_BATCH_PAGES` (optional; defaults to 16 after the first four pages, allowed range 1-32)
+- `STORAGE_BACKEND=s3` plus `S3_BUCKET`, `S3_REGION`, and credentials for persistent audio storage on Render. The original PDF is stored in PostgreSQL; local audio storage is ephemeral on Render and is intended for development only.
 
 After connecting PostgreSQL, accounts and documents from an ephemeral SQLite database cannot be recovered; users must
 register again and upload their PDFs again. If the frontend shows a 502 while the backend is starting, check the
@@ -127,8 +135,9 @@ Run these in order; each stage should work before you trust the next.
    ```bash
    cd backend && pytest tests/test_upload.py tests/test_extraction.py tests/test_chunking.py -v
    ```
-   Then, with the API running, open http://localhost:8000/docs → register → upload → `POST /pdf/{id}/process` →
-   `GET /pdf/{id}/text?page=1`. You should see your text split into sentences with bounding boxes.
+   Then, with the API running, open http://localhost:8000/docs → register → upload →
+   `GET /pdf/{id}/progress` → `GET /pdf/{id}/text?page=1`. Upload queues processing automatically; `POST /pdf/{id}/process`
+   is for retrying a failed or completed document.
 2. **TTS in isolation** (needs the Kokoro model, downloaded on first use)
    ```bash
    python - <<'PY'
@@ -141,10 +150,19 @@ Run these in order; each stage should work before you trust the next.
    Play `hello.wav`. If this works, segment generation will work.
 3. **Playback + sync:** `pytest tests/test_tts_audio.py tests/test_playback.py -v` (uses a tone generator in place of a real
    voice, so it checks the timing/caching/retry logic, not voice quality).
-4. **Everything:** `pytest -v` (69 tests), then use the UI.
+4. **Everything:** `pytest -v`, then use the UI.
 
-Expected UI flow: upload → "Process & read" → progress bar (SSE) → reader opens → press ▶ → first sentence is
-spoken and highlighted → pause/resume/next/previous work → close the tab → reopen → *Continue* resumes at the saved sentence.
+Expected UI flow: upload → select **Open reader** → progress bar (SSE) → first saved pages and audio arrive → press ▶
+→ first sentence is spoken and highlighted while later batches continue → pause/resume/next/previous work → close the
+tab → reopen → *Continue* resumes at the saved sentence.
+
+### Measured synthetic large-PDF run
+
+On the local Windows test environment, a generated 2,116-page text PDF padded to 23 MiB completed extraction with all
+2,116 pages saved. Upload validation plus enqueue took 0.254 s; the first page batch was saved 0.570 s after upload
+started; full extraction took 10.405 s. The run used SQLite and a mocked Celery enqueue, and did not synthesize audio
+or perform OCR. The padding is trailing whitespace, so this is a pipeline timing check, not a representative Render or
+23 MiB image-heavy scan benchmark. No before-change timing was collected.
 
 ## 6. API summary (all under `/api/v1`, JWT bearer auth except `auth/*`, `health`, `voice/available-voices`)
 

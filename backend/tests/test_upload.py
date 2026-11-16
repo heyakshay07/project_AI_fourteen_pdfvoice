@@ -12,7 +12,7 @@ def test_upload_valid_pdf_returns_metadata(client, auth):
     assert r.status_code == 201
     body = r.json()
     assert body["total_pages"] == 3 and body["filename"] == "My Report.pdf"
-    assert body["processing_status"] == "uploaded" and body["file_size"] > 0
+    assert body["processing_status"] == "queued" and body["file_size"] > 0
     assert "file_path" not in body  # private paths are never exposed
     assert client.get(f"/api/v1/pdf/{body['id']}/file", headers=auth).content == pdf_bytes
 
@@ -24,6 +24,21 @@ def test_upload_valid_pdf_returns_metadata(client, auth):
         doc = db.get(Document, uuid.UUID(body["id"]))
         assert doc.pdf_data == pdf_bytes
         assert doc.file_path is None
+
+
+def test_upload_does_not_analyze_all_pages_synchronously(client, auth, monkeypatch):
+    from app.api import routes
+    from app.agents import pdf_analyzer
+
+    def unexpected_full_analysis(_path):
+        raise AssertionError("upload should not scan every page before returning")
+
+    monkeypatch.setattr(pdf_analyzer, "analyze_pdf", unexpected_full_analysis)
+    monkeypatch.setattr(routes.pdf, "dispatch", lambda *_args: None)
+    response = upload(client, auth, F.small_pdf(10), "large.pdf")
+    assert response.status_code == 201
+    assert response.json()["total_pages"] == 10
+    assert response.json()["processing_status"] == "queued"
 
 
 def test_upload_requires_auth(client):
