@@ -10,7 +10,7 @@ from celery import Celery
 from sqlalchemy import delete
 
 from app.agents import voice_agent
-from app.agents import chunk_manager, pdf_analyzer, text_extraction, text_validation
+from app.agents import chunk_manager, text_extraction, text_validation
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.audio_segment import AudioSegment
@@ -71,6 +71,10 @@ def process_document(document_id: str) -> None:
         if doc is None:
             return
         key, pdf_data, filename = doc.file_path, doc.pdf_data, doc.filename
+        analysis = {
+            "page_count": doc.total_pages,
+            **(doc.analysis or {}),
+        }
     _set_progress(doc_id, "starting", 1, status="processing", error="")
 
     last = {"stage": "", "pct": -10.0}
@@ -82,15 +86,6 @@ def process_document(document_id: str) -> None:
 
     try:
         with _local_pdf_copy(pdf_data, key, filename) as path:
-            _set_progress(doc_id, "analyzing", 2)
-            analysis = pdf_analyzer.analyze_pdf(path)
-            with SessionLocal() as db:
-                doc = db.get(Document, doc_id)
-                if doc is None: return
-                doc.total_pages = analysis["page_count"]
-                doc.analysis = {k: analysis[k] for k in ("pdf_type", "ocr_pages", "metadata")}
-                db.commit()
-
             batch_size = 4
             for start in range(1, analysis["page_count"] + 1, batch_size):
                 end = min(start + batch_size - 1, analysis["page_count"])

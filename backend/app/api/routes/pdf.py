@@ -98,24 +98,18 @@ def get_document(doc: Document = Depends(get_owned_document)):
 
 
 @router.get("/{document_id}/file")
-def download_original(request: Request, doc: Document = Depends(get_owned_document)):
+def download_original(request: Request, doc: Document = Depends(get_owned_document), db: Session = Depends(get_db)):
     """Serves the original PDF to its owner (used by PDF.js). Storage paths are never revealed."""
-    if doc.pdf_data is not None:
-        data = doc.pdf_data
-    elif doc.file_path:
-        data = get_storage().get_bytes(doc.file_path)
-    else:
-        raise ApiError(404, "file_not_found", "The original PDF is unavailable")
-
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Disposition": f'inline; filename="{doc.id}.pdf"',
         "Cache-Control": "private, max-age=3600",
     }
     range_header = request.headers.get("range")
+    size = doc.file_size
+    start = end = None
     if range_header:
         match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
-        size = len(data)
         if not match or not any(match.groups()):
             return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
         first, last = match.groups()
@@ -124,14 +118,34 @@ def download_original(request: Request, doc: Document = Depends(get_owned_docume
             end = min(int(last), size - 1) if last else size - 1
         else:
             suffix_length = int(last)
+            if suffix_length == 0:
+                return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
             start, end = max(0, size - suffix_length), size - 1
         if start >= size or start > end:
             return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
-        partial = data[start : end + 1]
-        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-        headers["Content-Length"] = str(len(partial))
-        return Response(content=partial, status_code=206, media_type="application/pdf", headers=headers)
 
+    if doc.file_path:
+        data = get_storage().get_bytes(doc.file_path)
+        size = len(data)
+        if start is not None:
+            data = data[start : end + 1]
+    elif doc.file_size:
+        if start is None:
+            data = db.scalar(select(Document.pdf_data).where(Document.id == doc.id))
+        else:
+            # Bytea and SQLite blob substring positions are one-based. Fetch only the
+            # requested slice so PDF.js range loading does not transfer the full blob
+            # from PostgreSQL for every chunk.
+            data = db.scalar(select(func.substr(Document.pdf_data, start + 1, end - start + 1)).where(Document.id == doc.id))
+        if data is None:
+            raise ApiError(404, "file_not_found", "The original PDF is unavailable")
+    else:
+        raise ApiError(404, "file_not_found", "The original PDF is unavailable")
+
+    if start is not None:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(len(data))
+        return Response(content=data, status_code=206, media_type="application/pdf", headers=headers)
     return Response(content=data, media_type="application/pdf", headers=headers)
 
 
