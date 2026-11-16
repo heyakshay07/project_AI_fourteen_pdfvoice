@@ -2,6 +2,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
+from app.agents import groq_enrichment
 from app.services import ocr_service, pdf_service
 
 
@@ -33,14 +34,34 @@ def extract_pages(
             }
             try:
                 if number in ocr_needed:
-                    if not ocr_service.tesseract_available():
-                        errors.append("OCR is required for this page but Tesseract is not installed.")
-                    else:
-                        paras = ocr_service.ocr_page(page)
+                    paras = []
+                    local_ocr_error = None
+                    tesseract_ready = ocr_service.tesseract_available()
+                    if tesseract_ready:
+                        try:
+                            paras = ocr_service.ocr_page(page)
+                        except Exception as exc:
+                            local_ocr_error = exc
+                    if paras:
                         entry["paragraphs"] = [
                             {"text": _clean_text(p.text), "bbox": list(p.bbox), "is_heading": False} for p in paras
                         ]
-                        entry["method"] = "ocr" if paras else "none"
+                        entry["method"] = "ocr"
+                    else:
+                        # Do not send blank pages to a paid remote model. Groq OCR is
+                        # a fallback only when local OCR is missing or failed.
+                        groq_text = groq_enrichment.extract_scanned_page(page) if not tesseract_ready or local_ocr_error else None
+                        if groq_text:
+                            entry["paragraphs"] = [{
+                                "text": _clean_text(groq_text),
+                                "bbox": [0.0, 0.0, entry["width"], entry["height"]],
+                                "is_heading": False,
+                            }]
+                            entry["method"] = "ocr"
+                        elif local_ocr_error:
+                            errors.append(f"OCR failed: {local_ocr_error}")
+                        elif not tesseract_ready:
+                            errors.append("OCR is required for this page but Tesseract and Groq OCR are unavailable.")
                 else:
                     ex = pdf_service.extract_text_page(page)
                     entry["paragraphs"] = [

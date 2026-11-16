@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Uploads
     max_upload_mb: int = 100
     max_pages: int = 5000
+    processing_batch_pages: int = Field(default=4, ge=1, le=32)
 
     # Extraction
     ocr_languages: str = "eng+hin+mar"
@@ -53,6 +54,7 @@ class Settings(BaseSettings):
     # Optional Groq models: local extraction/TTS remain usable without an API key.
     groq_api_key: str = ""
     groq_text_model: str = "openai/gpt-oss-20b"
+    groq_vision_model: str = "qwen/qwen3.8-27b"
     groq_tts_model: str = "canopylabs/orpheus-v1-english"
 
     @field_validator("task_backend")

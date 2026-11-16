@@ -18,6 +18,19 @@ export default function TextPanel({ pageData, activeSentence, onSelect }) {
           {pageData.validation_notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
+      {pageData.ai_summary && (
+        <section className="mb-4 rounded-lg bg-indigo-50 p-3 text-sm dark:bg-indigo-950/40">
+          <h3 className="mb-1 font-semibold">AI summary</h3>
+          <p>{pageData.ai_summary}</p>
+          {pageData.ai_prepared_text && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer font-medium">Show AI-prepared text</summary>
+              <p className="mt-2 whitespace-pre-wrap leading-6">{pageData.ai_prepared_text}</p>
+              <p className="mt-2 text-slate-500">Voice playback uses the original extracted text.</p>
+            </details>
+          )}
+        </section>
+      )}
       {pageData.sentences.length === 0 && <p className="text-sm text-slate-500">No readable text was found on this page.</p>}
       <p className="leading-8">
         {pageData.sentences.map((s) => (

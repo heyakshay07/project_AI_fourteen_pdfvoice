@@ -13,6 +13,12 @@ const STAGES = {
   validating: 'Validating extracted text…', ocr_retry: 'Re-reading unclear pages with OCR…', chunking: 'Preparing sentences for reading…', saving: 'Saving…',
 };
 
+function mergeSegments(existing, incoming) {
+  const byId = new Map(existing.map((segment) => [segment.id, segment]));
+  incoming.forEach((segment) => byId.set(segment.id, segment));
+  return [...byId.values()].sort((a, b) => a.page_number - b.page_number || a.chunk_index - b.chunk_index);
+}
+
 function Processing({ doc, progress, onRetry }) {
   if (doc.processing_status === 'failed') {
     return (
@@ -84,9 +90,10 @@ export default function ReaderPage() {
     streamProgress(id, async (p) => {
       setProgress(p);
       if (p.pages_extracted > 0 && p.pages_extracted !== lastSegmentPageCount.current) {
+        const firstNewPage = lastSegmentPageCount.current + 1;
         lastSegmentPageCount.current = p.pages_extracted;
-        const ready = await voice.segments(id).catch(() => null);
-        if (ready) setSegments(ready);
+        const ready = await voice.segments(id, firstNewPage).catch(() => null);
+        if (ready) setSegments((current) => mergeSegments(current, ready));
         setPdfUrl(pdf.fileUrl(id));
       }
       if (p.processing_status === 'completed' || p.processing_status === 'failed') setDoc(await pdf.get(id));
@@ -105,7 +112,7 @@ export default function ReaderPage() {
     if (!doc || !['queued', 'processing', 'completed'].includes(doc.processing_status)) return;
     setPdfUrl(pdf.fileUrl(id));
     Promise.all([voice.segments(id), history.get(id).catch(() => null)]).then(([segs, h]) => {
-      setSegments(segs);
+      setSegments((current) => mergeSegments(current, segs));
       const start = h?.current_page ? { page: h.current_page, sentence: h.current_sentence || 0 } : { page: segs[0]?.page_number || 1, sentence: 0 };
       player.setPosition(start);
       setViewPage(start.page);

@@ -179,7 +179,8 @@ def get_text(
         pages=[
             PageText(page_number=p.page_number, width=p.width, height=p.height, extraction_method=p.extraction_method,
                      validation_status=p.validation_status, validation_notes=p.validation_notes or [],
-                     text=p.extracted_text or "", sentences=p.sentences or [])
+                     text=p.extracted_text or "", ai_prepared_text=p.ai_prepared_text, ai_summary=p.ai_summary,
+                     sentences=p.sentences or [])
             for p in rows
         ],
     )

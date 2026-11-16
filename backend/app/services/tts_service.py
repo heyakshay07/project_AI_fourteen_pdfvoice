@@ -10,8 +10,10 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 
+import httpx
 import numpy as np
 
+from app.core.config import settings
 from app.utils import audio_utils
 
 
@@ -193,13 +195,81 @@ class XTTSProvider(TTSProvider):
         return np.asarray(wav, dtype=np.float32), self.SAMPLE_RATE
 
 
+# ---------------------------------------------------------------- Groq Orpheus
+class GroqProvider(TTSProvider):
+    name, label = "groq", "Groq Orpheus (online, English)"
+    SAMPLE_RATE = 24000
+    MAX_INPUT_CHARS = 200
+    _VOICES = [
+        ("autumn", "Autumn", "en", "female"), ("diana", "Diana", "en", "female"),
+        ("hannah", "Hannah", "en", "female"), ("austin", "Austin", "en", "male"),
+        ("daniel", "Daniel", "en", "male"), ("troy", "Troy", "en", "male"),
+    ]
+
+    def is_available(self):
+        if not settings.groq_api_key:
+            return False, "Set GROQ_API_KEY on the backend to enable Groq voices"
+        if not audio_utils.ffmpeg_available():
+            return False, "ffmpeg is required to decode Groq WAV audio"
+        return True, ""
+
+    def voices(self):
+        return [Voice(i, n, lang, gender, self.name) for i, n, lang, gender in self._VOICES]
+
+    @classmethod
+    def _split_input(cls, text: str) -> list[str]:
+        parts = []
+        remaining = text.strip()
+        while len(remaining) > cls.MAX_INPUT_CHARS:
+            cut = remaining.rfind(" ", 1, cls.MAX_INPUT_CHARS + 1)
+            if cut < cls.MAX_INPUT_CHARS // 2:
+                cut = cls.MAX_INPUT_CHARS
+            parts.append(remaining[:cut])
+            remaining = remaining[cut:].lstrip()
+        if remaining:
+            parts.append(remaining)
+        return parts
+
+    def synthesize(self, text, voice, language, speed=1.0):
+        ok, reason = self.is_available()
+        if not ok:
+            raise TTSError(reason)
+        if language != "en":
+            raise TTSError("Groq Orpheus currently supports English voices only")
+        try:
+            audio_parts = []
+            for part in self._split_input(text):
+                response = httpx.post(
+                    "https://api.groq.com/openai/v1/audio/speech",
+                    headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                    json={
+                        "model": settings.groq_tts_model,
+                        "input": part,
+                        "voice": voice,
+                        "response_format": "wav",
+                        "sample_rate": self.SAMPLE_RATE,
+                        "speed": speed,
+                    },
+                    timeout=90,
+                )
+                response.raise_for_status()
+                audio_parts.append(audio_utils.decode_to_float32(response.content, self.SAMPLE_RATE))
+            if not audio_parts:
+                raise TTSError("Groq returned no audio")
+            return np.concatenate(audio_parts), self.SAMPLE_RATE
+        except TTSError:
+            raise
+        except Exception as exc:
+            raise TTSError(f"Groq TTS request failed ({type(exc).__name__})") from exc
+
+
 # ---------------------------------------------------------------- registry
 _providers: dict[str, TTSProvider] = {}
 
 
 def _ensure_registry() -> None:
     if not _providers:
-        for p in (KokoroProvider(), EdgeTTSProvider(), XTTSProvider()):
+        for p in (KokoroProvider(), EdgeTTSProvider(), XTTSProvider(), GroqProvider()):
             _providers[p.name] = p
 
 

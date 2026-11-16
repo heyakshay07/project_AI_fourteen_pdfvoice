@@ -10,7 +10,7 @@ from celery import Celery
 from sqlalchemy import delete
 
 from app.agents import voice_agent
-from app.agents import chunk_manager, text_extraction, text_validation
+from app.agents import chunk_manager, groq_enrichment, text_extraction, text_validation
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.audio_segment import AudioSegment
@@ -86,7 +86,7 @@ def process_document(document_id: str) -> None:
 
     try:
         with _local_pdf_copy(pdf_data, key, filename) as path:
-            batch_size = 4
+            batch_size = settings.processing_batch_pages
             for start in range(1, analysis["page_count"] + 1, batch_size):
                 end = min(start + batch_size - 1, analysis["page_count"])
                 pages = text_extraction.extract_pages(path, analysis, only_pages=set(range(start, end + 1)))
@@ -97,14 +97,18 @@ def process_document(document_id: str) -> None:
                     pages = [({**redone[p["page_number"]], "errors": [], "validation_status": "ok", "validation_notes": []}
                               if p["page_number"] in redone and redone[p["page_number"]]["paragraphs"] else p) for p in pages]
                     pages, _ = text_validation.validate_pages(pages)
+                ai_pages = groq_enrichment.enrich_pages(pages)
                 chunks = chunk_manager.build_chunks(pages)
                 with SessionLocal() as db:
                     doc = db.get(Document, doc_id)
                     if doc is None: return
                     for p in pages:
                         pc = chunks[p["page_number"]]
+                        ai_page = ai_pages.get(p["page_number"], {})
                         db.add(DocumentPage(document_id=doc_id, page_number=p["page_number"],
                             extracted_text=_remove_nuls("\n\n".join(x["text"] for x in p["paragraphs"])), extraction_method=p["method"],
+                            ai_prepared_text=_remove_nuls(ai_page.get("prepared_text")) if ai_page.get("prepared_text") else None,
+                            ai_summary=_remove_nuls(ai_page.get("summary")) if ai_page.get("summary") else None,
                             validation_status=p["validation_status"], validation_notes=_remove_nuls(p["validation_notes"]),
                             width=p["width"], height=p["height"], sentences=_remove_nuls(pc["sentences"])))
                         for c in pc["chunks"]:

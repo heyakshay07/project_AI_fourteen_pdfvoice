@@ -84,7 +84,7 @@ export const voice = {
   getSettings: () => d(http.get('/api/v1/voice/settings')),
   putSettings: (body) => d(http.put('/api/v1/voice/settings', body)),
   generate: (documentId) => d(http.post('/api/v1/voice/generate', { document_id: documentId })),
-  segments: (id) => d(http.get(`/api/v1/voice/${id}/segments`)),
+  segments: (id, fromPage = 1) => d(http.get(`/api/v1/voice/${id}/segments`, { params: { from_page: fromPage } })),
   segmentDetail: (id, segId) => d(http.get(`/api/v1/voice/${id}/segments/${segId}`)),
   audio: (id, segId) =>
     http.get(`/api/v1/voice/${id}/audio/${segId}`, { responseType: 'blob' }).then((r) => URL.createObjectURL(r.data)),

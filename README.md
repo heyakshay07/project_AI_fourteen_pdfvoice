@@ -1,8 +1,8 @@
 # PDFVoice AI
 
 Upload a PDF and have it read aloud, word for word, by a natural voice, with the current sentence highlighted.
-Text is **never summarised or rewritten**: the audio is generated from exactly the sentences that were extracted,
-and extraction problems are reported rather than papered over.
+The original extracted text remains the source for speech. When Groq is configured, it can provide separate
+OCR fallbacks, prepared reading copies, and short page summaries; AI output never replaces the source sentences.
 
 - **Frontend:** React + Vite + Tailwind, PDF.js, Axios, HTML5 Audio, SSE progress
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, PostgreSQL, Celery + Redis
@@ -30,7 +30,7 @@ Upload ─► FastAPI ─► PDF Analyzer ─► text PDF ─► PyMuPDF ─┐
                                   Playback Agent saves page/sentence/percentage ("resume")
 ```
 
-The six agents live in `backend/app/agents/`:
+The specialized agents live in `backend/app/agents/`:
 
 | Agent | File | Job |
 |---|---|---|
@@ -41,6 +41,11 @@ The six agents live in `backend/app/agents/`:
 | Voice Generation | `voice_agent.py` | TTS per sentence, caching, 3 retries, idempotent (no duplicate segments) |
 | Playback Management | `playback_agent.py` | position, next/prev sentence & page, progress %, resume |
 | Workflow | `workflow.py` | LangGraph graph that wires the first four together |
+| Groq Enrichment | `groq_enrichment.py` | optional vision OCR fallback plus prepared text and summaries |
+
+Large PDFs are prepared in four-page batches. The reader loads page text as each batch is saved, refreshes the segment
+list only when a batch arrives, and generates voice audio lazily for the current chunk and the next two chunks.
+Groq TTS is available for English when `GROQ_API_KEY` is configured; local and Edge voices remain available too.
 
 Design decisions worth knowing:
 
@@ -53,6 +58,7 @@ Design decisions worth knowing:
 - **Highlight on the PDF is paragraph-level** (the bounding box of the paragraph containing the sentence).
   The *Text* tab highlights the exact sentence.
 - **`DELETE /history/{id}` resets reading progress only.** `DELETE /pdf/{id}` deletes the document, its audio and its progress.
+- **AI output is separate.** Page summaries and prepared text appear in the Text tab; synchronized speech uses original extracted sentences.
 
 ## 2. Quick start with Docker (recommended)
 
@@ -102,6 +108,11 @@ PostgreSQL database and set these backend environment variables in the Render da
 - `SECRET_KEY`: a strong random value; keep it unchanged across deploys so existing login tokens remain valid
 - `APP_ENV=production`
 - `CORS_ORIGINS=https://project-ai-fourteen-pdfvoice.onrender.com`
+- `GROQ_API_KEY` (optional; enables Groq OCR fallback, page enrichment, and English Orpheus voices)
+- `GROQ_TEXT_MODEL` (optional; defaults to `openai/gpt-oss-20b`)
+- `GROQ_VISION_MODEL` (optional; defaults to `qwen/qwen3.8-27b`)
+- `GROQ_TTS_MODEL` (optional; defaults to `canopylabs/orpheus-v1-english`)
+- `PROCESSING_BATCH_PAGES` (optional; defaults to 4, allowed range 1-32)
 
 After connecting PostgreSQL, accounts and documents from an ephemeral SQLite database cannot be recovered; users must
 register again and upload their PDFs again. If the frontend shows a 502 while the backend is starting, check the

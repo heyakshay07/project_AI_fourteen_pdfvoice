@@ -46,6 +46,8 @@ class DocumentPage(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
     page_number: Mapped[int] = mapped_column(Integer)  # 1-based
     extracted_text: Mapped[str] = mapped_column(Text, default="")
+    ai_prepared_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     extraction_method: Mapped[str] = mapped_column(String(20), default="text")  # text | ocr | none
     validation_status: Mapped[str] = mapped_column(String(20), default="ok")  # ok | warning | empty | failed
     validation_notes: Mapped[list | None] = mapped_column(JSON, nullable=True)

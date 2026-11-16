@@ -6,6 +6,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 email-validator==2.2.0
 PyJWT==2.10.1
+httpx==0.28.1
 
 # --- Database ---
 SQLAlchemy==2.0.36
@@ -31,4 +32,3 @@ boto3==1.35.90
 
 # --- Tests ---
 pytest==8.3.4
-httpx==0.28.1

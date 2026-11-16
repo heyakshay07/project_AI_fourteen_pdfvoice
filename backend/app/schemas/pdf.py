@@ -43,6 +43,8 @@ class PageText(BaseModel):
     validation_status: str
     validation_notes: list[str] = []
     text: str
+    ai_prepared_text: str | None = None
+    ai_summary: str | None = None
     sentences: list[SentenceOut]
 
 
