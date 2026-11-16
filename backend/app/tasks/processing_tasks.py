@@ -24,6 +24,17 @@ celery_app = Celery("pdfvoice", broker=settings.redis_url, backend=settings.redi
 celery_app.conf.update(task_track_started=True, task_acks_late=True, worker_prefetch_multiplier=1)
 
 
+def _remove_nuls(value):
+    """Strip PostgreSQL-incompatible NULs from text values, including nested JSON."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_remove_nuls(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _remove_nuls(item) for key, item in value.items()}
+    return value
+
+
 @contextmanager
 def _local_pdf_copy(pdf_data: bytes | None, key: str | None, filename: str) -> Iterator[Path]:
     if pdf_data is not None:
@@ -98,9 +109,9 @@ def process_document(document_id: str) -> None:
                     for p in pages:
                         pc = chunks[p["page_number"]]
                         db.add(DocumentPage(document_id=doc_id, page_number=p["page_number"],
-                            extracted_text="\n\n".join(x["text"] for x in p["paragraphs"]), extraction_method=p["method"],
-                            validation_status=p["validation_status"], validation_notes=p["validation_notes"],
-                            width=p["width"], height=p["height"], sentences=pc["sentences"]))
+                            extracted_text=_remove_nuls("\n\n".join(x["text"] for x in p["paragraphs"])), extraction_method=p["method"],
+                            validation_status=p["validation_status"], validation_notes=_remove_nuls(p["validation_notes"]),
+                            width=p["width"], height=p["height"], sentences=_remove_nuls(pc["sentences"])))
                         for c in pc["chunks"]:
                             db.add(AudioSegment(document_id=doc_id, page_number=p["page_number"], **c))
                     db.commit()
