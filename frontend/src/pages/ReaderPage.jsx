@@ -52,7 +52,14 @@ export default function ReaderPage() {
   const requested = useRef(new Set());
 
   const voiceKey = voiceSettings ? `${voiceSettings.voice_engine}|${voiceSettings.voice_name}|${voiceSettings.language}` : '';
-  const player = useAudioPlayer({ documentId: id, segments, voiceKey, onError: (e) => toast.error(errorMessage(e)) });
+  const player = useAudioPlayer({
+    documentId: id,
+    segments,
+    voiceKey,
+    processing: ['queued', 'processing'].includes(doc?.processing_status),
+    canSaveProgress: doc?.processing_status === 'completed',
+    onError: (e) => toast.error(errorMessage(e)),
+  });
 
   // ----- load + process
   const startProcessing = useCallback(async () => {

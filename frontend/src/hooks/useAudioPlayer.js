@@ -11,7 +11,7 @@ const PREFETCH_AHEAD = 2;
  * Segments are fetched through axios (so the JWT is sent) and played from blob URLs; the next segments
  * are prefetched so playback continues without gaps.
  */
-export default function useAudioPlayer({ documentId, segments, voiceKey, initialPosition, onError, processing = false }) {
+export default function useAudioPlayer({ documentId, segments, voiceKey, initialPosition, onError, processing = false, canSaveProgress = false }) {
   const audioRef = useRef(null);
   if (audioRef.current === null && typeof Audio !== 'undefined') audioRef.current = new Audio();
 
@@ -36,6 +36,8 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
   const shouldContinue = useRef(false);
   const processingRef = useRef(processing);
   processingRef.current = processing;
+  const canSaveProgressRef = useRef(canSaveProgress);
+  canSaveProgressRef.current = canSaveProgress;
 
   const segs = segments || [];
   const segsRef = useRef(segs);
@@ -83,8 +85,11 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
 
   // ---------------------------------------------------------------- progress persistence
   const saveSoon = useCallback((page, sentence) => {
+    if (!canSaveProgressRef.current) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => history.saveProgress(documentId, page, sentence).catch(() => {}), 2500);
+    saveTimer.current = setTimeout(() => {
+      if (canSaveProgressRef.current) history.saveProgress(documentId, page, sentence).catch(() => {});
+    }, 2500);
   }, [documentId]);
 
   const sync = useCallback((action, extra = {}) => {
@@ -172,7 +177,7 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
         stopLoop();
         setPlayingBoth(false);
         const last = segsRef.current[segsRef.current.length - 1];
-        if (last) { history.saveProgress(documentId, last.page_number, last.sentence_end).catch(() => {}); }
+        if (last && canSaveProgressRef.current) { history.saveProgress(documentId, last.page_number, last.sentence_end).catch(() => {}); }
       }
     };
     a.addEventListener('timeupdate', onTime);
@@ -335,7 +340,7 @@ export default function useAudioPlayer({ documentId, segments, voiceKey, initial
     const a = audioRef.current;
     if (a) { a.pause(); a.removeAttribute('src'); }
     const { page, sentence } = posRef.current;
-    if (documentId) history.saveProgress(documentId, page, sentence).catch(() => {});
+    if (documentId && canSaveProgressRef.current) history.saveProgress(documentId, page, sentence).catch(() => {});
     clearCache();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId]);
