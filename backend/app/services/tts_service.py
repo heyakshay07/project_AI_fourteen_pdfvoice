@@ -6,6 +6,7 @@ app starts even when their packages are not installed. OpenAI is never required.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
@@ -15,6 +16,8 @@ import numpy as np
 
 from app.core.config import settings
 from app.utils import audio_utils
+
+log = logging.getLogger("pdfvoice.tts")
 
 
 class TTSError(Exception):
@@ -116,6 +119,9 @@ class EdgeTTSProvider(TTSProvider):
     ]
     SAMPLE_RATE = 24000
 
+    def __init__(self):
+        self._request_lock = threading.Lock()
+
     def is_available(self):
         try:
             import edge_tts  # noqa: F401
@@ -144,14 +150,24 @@ class EdgeTTSProvider(TTSProvider):
         if not ok:
             raise TTSError(reason)
         try:
-            data = asyncio.run(self._fetch(text, voice, speed))
+            with self._request_lock:
+                data = asyncio.run(self._fetch(text, voice, speed))
             if not data:
-                raise TTSError("Edge TTS returned no audio")
+                log.warning("Microsoft Edge TTS returned an empty stream for voice %s", voice)
+                raise TTSError(
+                    "Microsoft Edge TTS returned no audio. The service may be rate-limiting "
+                    "this server; wait a moment and retry, or select a local Kokoro voice."
+                )
             return audio_utils.decode_to_float32(data, self.SAMPLE_RATE), self.SAMPLE_RATE
         except TTSError:
             raise
         except Exception as exc:
-            raise TTSError(f"Edge TTS failed: {exc}") from exc
+            log.warning("Microsoft Edge TTS request failed for voice %s", voice, exc_info=exc)
+            raise TTSError(
+                "Microsoft Edge TTS did not return audio. The service may be temporarily "
+                "unavailable or rate-limiting this server; wait a moment and retry, or "
+                "select a local Kokoro voice."
+            ) from exc
 
 
 # ---------------------------------------------------------------- Coqui XTTS-v2

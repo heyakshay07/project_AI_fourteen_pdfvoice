@@ -1,4 +1,9 @@
+import asyncio
 import io
+from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
+import pytest
 
 import soundfile as sf
 
@@ -17,6 +22,38 @@ def test_available_voices_lists_engines(client):
     assert {"kokoro", "edge", "xtts"} <= set(engines)
     langs = {v["language"] for e in engines.values() for v in e["voices"]}
     assert {"en", "hi", "mr"} <= langs
+
+
+def test_edge_requests_are_serialized_and_empty_responses_explain_recovery(monkeypatch):
+    provider = tts_service.EdgeTTSProvider()
+    active = peak = 0
+
+    monkeypatch.setattr(provider, "is_available", lambda: (True, ""))
+    monkeypatch.setattr(
+        tts_service.audio_utils,
+        "decode_to_float32",
+        lambda _data, _rate: np.array([0.1], dtype=np.float32),
+    )
+
+    async def fetch(_text, _voice, _speed):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return b"audio"
+
+    monkeypatch.setattr(provider, "_fetch", fetch)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: provider.synthesize("Hello", "en-US-AriaNeural", "en"), range(2)))
+    assert peak == 1
+
+    async def empty_fetch(_text, _voice, _speed):
+        return b""
+
+    monkeypatch.setattr(provider, "_fetch", empty_fetch)
+    with pytest.raises(tts_service.TTSError, match="wait a moment and retry"):
+        provider.synthesize("Hello", "en-US-AriaNeural", "en")
 
 
 def test_voice_settings_roundtrip_and_validation(client, auth, tone):
