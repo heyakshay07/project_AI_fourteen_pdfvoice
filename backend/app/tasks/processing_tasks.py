@@ -61,10 +61,6 @@ def process_document(document_id: str) -> None:
             return
         key, pdf_data, filename = doc.file_path, doc.pdf_data, doc.filename
     _set_progress(doc_id, "starting", 1, status="processing", error="")
-    with SessionLocal() as db:
-        db.execute(delete(AudioSegment).where(AudioSegment.document_id == doc_id))
-        db.execute(delete(DocumentPage).where(DocumentPage.document_id == doc_id))
-        db.commit()
 
     last = {"stage": "", "pct": -10.0}
 

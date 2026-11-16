@@ -5,6 +5,11 @@ from pathlib import Path
 from app.services import ocr_service, pdf_service
 
 
+def _clean_text(text: str) -> str:
+    """Remove characters PostgreSQL cannot store in text or JSON string values."""
+    return text.replace("\x00", "")
+
+
 def extract_pages(
     path: Path,
     analysis: dict,
@@ -33,13 +38,13 @@ def extract_pages(
                     else:
                         paras = ocr_service.ocr_page(page)
                         entry["paragraphs"] = [
-                            {"text": p.text, "bbox": list(p.bbox), "is_heading": False} for p in paras
+                            {"text": _clean_text(p.text), "bbox": list(p.bbox), "is_heading": False} for p in paras
                         ]
                         entry["method"] = "ocr" if paras else "none"
                 else:
                     ex = pdf_service.extract_text_page(page)
                     entry["paragraphs"] = [
-                        {"text": p.text, "bbox": list(p.bbox), "is_heading": p.is_heading} for p in ex.paragraphs
+                        {"text": _clean_text(p.text), "bbox": list(p.bbox), "is_heading": p.is_heading} for p in ex.paragraphs
                     ]
                     entry["method"] = ex.method
                     entry["raw_word_count"] = ex.raw_word_count

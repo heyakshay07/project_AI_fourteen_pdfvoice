@@ -52,12 +52,10 @@ export default function ReaderPage() {
   const requested = useRef(new Set());
 
   const voiceKey = voiceSettings ? `${voiceSettings.voice_engine}|${voiceSettings.voice_name}|${voiceSettings.language}` : '';
-  const player = useAudioPlayer({ documentId: id, segments, voiceKey, processing: ['queued', 'processing'].includes(doc?.processing_status), onError: (e) => toast.error(errorMessage(e)) });
+  const player = useAudioPlayer({ documentId: id, segments, voiceKey, onError: (e) => toast.error(errorMessage(e)) });
 
   // ----- load + process
   const startProcessing = useCallback(async () => {
-    setSegments([]);
-    setProgress(null);
     try { await pdf.process(id); } catch (e) { if (e.response?.status !== 409) toast.error(errorMessage(e)); }
     setDoc(await pdf.get(id));
   }, [id, toast]);
@@ -111,13 +109,9 @@ export default function ReaderPage() {
     if (!n || requested.current.has(n)) return;
     requested.current.add(n);
     pdf.page(id, n).then((p) => setPages((m) => ({ ...m, [n]: p })))
-      .catch((e) => {
-        requested.current.delete(n);
-        if (e.response?.status !== 404) toast.error(errorMessage(e));
-        else if (doc?.processing_status === 'completed') setPages((m) => ({ ...m, [n]: { page_number: n, sentences: [], validation_status: 'empty', validation_notes: ['This page has no extracted text.'], extraction_method: 'none' } }));
-      });
-  }, [id, toast, doc?.processing_status]);
-  useEffect(() => { if (['processing', 'completed'].includes(doc?.processing_status)) { ensurePage(viewPage); ensurePage(player.position.page); } }, [viewPage, player.position.page, doc?.processing_status, progress?.pages_extracted, ensurePage]);
+      .catch((e) => { requested.current.delete(n); if (e.response?.status !== 404) toast.error(errorMessage(e)); else setPages((m) => ({ ...m, [n]: { page_number: n, sentences: [], validation_status: 'empty', validation_notes: ['This page has no extracted text.'], extraction_method: 'none' } })); });
+  }, [id, toast]);
+  useEffect(() => { if (doc?.processing_status === 'completed') { ensurePage(viewPage); ensurePage(player.position.page); } }, [viewPage, player.position.page, doc?.processing_status, ensurePage]);
 
   // follow the reader while audio is playing
   useEffect(() => { if (player.playing) setViewPage(player.position.page); }, [player.playing, player.position.page]);
@@ -151,10 +145,8 @@ export default function ReaderPage() {
     <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[1fr_380px]">
       <section aria-label="Document">
         {doc.processing_status !== 'completed' && <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950 dark:text-brand-100">
-          {doc.processing_status === 'failed' ? <><span>{doc.error_message || 'The pages could not be prepared.'}</span> <button className="ml-2 underline" onClick={startProcessing}>Retry preparation</button></> : <>
-            {STAGES[progress?.stage || doc.progress_stage] || 'Preparing the next section…'} {Math.round(progress?.percent ?? doc.progress_percent ?? 0)}%
-            {progress && <span className="ml-2">· {progress.pages_extracted}/{progress.total_pages} pages ready. You can listen while the next pages are prepared.</span>}
-          </>}
+          {STAGES[progress?.stage || doc.progress_stage] || 'Preparing the next section…'} {Math.round(progress?.percent ?? doc.progress_percent ?? 0)}%
+          {progress && <span className="ml-2">· {progress.pages_extracted}/{progress.total_pages} pages ready. You can listen while the next pages are prepared.</span>}
         </div>}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">

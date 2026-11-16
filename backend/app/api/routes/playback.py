@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.agents import playback_agent as agent
-from app.api.deps import ApiError
+from app.api.deps import ApiError, require_completed
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.document import Document
